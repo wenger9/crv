@@ -1,0 +1,365 @@
+custom:
+  default_cluster_spec: &id001
+    spark_version: 12.1.x-cpu-ml-scala2.12
+    instance_pool_id: 0511-140736-blent10-pool-u8krwlv6
+    driver_instance_pool_id: 0511-140736-blent10-pool-u8krwlv6
+    num_workers: 1
+    spark_conf:
+      fs.azure.account.oauth.provider.type.saameusdevdsfdata01.dfs.core.windows.net: org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider
+      fs.azure.account.oauth2.client.endpoint.saameusdevdsfdata01.dfs.core.windows.net: https://login.microsoftonline.com/0c5638da-d686-4d6a-8df4-e0552c70cb17/oauth2/token
+      fs.azure.account.oauth2.client.secret.saameusdevdsfdata01.dfs.core.windows.net: "{{secrets/AKV-AM-EUS-DEV-DSF-GDA/SP-DataBrick-AM-EUS-Dev-DSF}}"
+      spark.rpc.message.maxSize: "1024"
+      fs.azure.account.auth.type.saameusdevdsfdata01.dfs.core.windows.net: OAuth
+      fs.azure.account.oauth2.client.id.saameusdevdsfdata01.dfs.core.windows.net: 8770d3ee-90f9-40d6-8a52-68844a121418
+  train-cluster-spec: &id002
+    spark_version: 12.1.x-cpu-ml-scala2.12
+    node_type_id: Standard_DS12_v2
+    driver_node_type_id: Standard_DS12_v2
+    num_workers: 4
+  dev_cluster_config:
+    new_cluster: *id001
+  staging_cluster_config:
+    new_cluster: *id001
+  prod_cluster_config:
+    new_cluster: *id001
+  dev_train_cluster_config:
+    new_cluster: *id001
+  staging_train_cluster_config:
+    new_cluster: *id002
+  prod_train_cluster_config:
+    new_cluster: *id002
+  dev_acl: &id003
+  - user_name: service-principal://SP-DataBrick-AM-EUS-Dev-DSF
+    permission_level: IS_OWNER
+  - group_name: rbm-ds
+    permission_level: CAN_MANAGE
+  staging_acl: &id004
+  - user_name: service-principal://SP-DataBrick-AM-EUS-Dev-DSF
+    permission_level: IS_OWNER
+  - group_name: rbm-ds
+    permission_level: CAN_MANAGE_RUN
+  prod_acl: &id005
+  - user_name: service-principal://SP-DataBrick-AM-EUS-Dev-DSF
+    permission_level: IS_OWNER
+  - group_name: rbm-ds
+    permission_level: CAN_MANAGE_RUN
+
+environments: 
+  dev:
+    workflows:
+    - name: CLV_DEV_NOAM_data
+      access_control_list: *id003
+      job_clusters:
+      - job_cluster_key: dev_data_cluster
+        new_cluster: *id001
+      tasks:
+      - task_key: data
+        job_cluster_key: dev_data_cluster
+        spark_python_task:
+          python_file: file://gda_clv/data_engineering_pipelines/NOAM/data_preparation.py
+          parameters:
+          - --base-conf
+          - file:fuse://conf/base.yml
+          - --env-conf
+          - file:fuse://conf/environments/dev.yml       
+          - --model-conf
+          - file:fuse://conf/models/NOAM/data_preparation.yml
+    - name: CLV_DEV_NOAM_model_frequency
+      access_control_list: *id003
+      job_clusters:
+      - job_cluster_key: dev_model_frequency_cluster
+        new_cluster: *id001
+      tasks:
+      - task_key: train_model_frequency
+        job_cluster_key: dev_model_frequency_cluster
+        spark_python_task:
+          python_file: file://gda_clv/model_pipelines/train_model_frequency.py
+          parameters:
+          - --base-conf
+          - file:fuse://conf/base.yml
+          - --env-conf
+          - file:fuse://conf/environments/dev.yml
+          - --model-conf
+          - file:fuse://conf/models/NOAM/frequency_modeling.yml
+        dependsOn: data
+    - name: CLV_DEV_NOAM_model_monetary
+      access_control_list: *id003
+      job_clusters:
+      - job_cluster_key: dev_model_monetary_cluster
+        new_cluster: *id001
+      tasks:
+      - task_key: train_model_monetary
+        job_cluster_key: dev_model_monetary_cluster
+        spark_python_task:
+          python_file: file://gda_clv/model_pipelines/train_model_monetary.py
+          parameters:
+          - --base-conf
+          - file:fuse://conf/base.yml
+          - --env-conf
+          - file:fuse://conf/environments/dev.yml
+          - --model-conf
+          - file:fuse://conf/models/NOAM/monetary_modeling.yml
+        dependsOn: train_model_frequency        
+    - name: CLV_DEV_NOAM_projections
+      access_control_list: *id003
+      job_clusters:
+      - job_cluster_key: dev_projection_cluster
+        new_cluster: *id001
+      tasks:
+      - task_key: project
+        job_cluster_key: dev_projection_cluster
+        spark_python_task:
+          python_file: file://gda_clv/model_pipelines/project_model_clv.py
+          parameters:
+          - --base-conf
+          - file:fuse://conf/base.yml
+          - --env-conf
+          - file:fuse://conf/environments/dev.yml
+          - --model-conf
+          - file:fuse://conf/models/NOAM/clv_projection.yml     
+        dependsOn: train_model_monetary
+    - name: CLV_DEV_NOAM_inference
+      access_control_list: *id003
+      job_clusters:
+      - job_cluster_key: dev_inference_cluster
+        new_cluster: *id001
+      tasks:
+      - task_key: inference
+        job_cluster_key: dev_inference_cluster
+        spark_python_task:
+          python_file: file://gda_clv/model_pipelines/inference_model_clv.py
+          parameters:
+          - --base-conf
+          - file:fuse://conf/base.yml
+          - --env-conf
+          - file:fuse://conf/environments/dev.yml
+          - --model-conf
+          - file:fuse://conf/models/NOAM/inference.yml
+        dependsOn: project
+  staging:
+    workflows:
+    - name: CLV_STAGING_meta_checking
+      access_control_list: *id003
+      job_clusters:
+      - job_cluster_key: staging_meta_checking_cluster
+        new_cluster: *id001
+      tasks:
+      - task_key: meta_checking
+        job_cluster_key: staging_meta_checking_cluster
+        spark_python_task:
+          python_file: file://gda_clv/utils/job_meta_checker.py
+          parameters:
+            - --base-conf
+            - file:fuse://conf/base.yml
+            - --env-conf
+            - file:fuse://conf/environments/staging.yml       
+            - --model-conf
+            - file:fuse://conf/models/NOAM/frequency_modeling.yml
+    - name: CLV_STAGING_NOAM_data
+      schedule:
+        quartz_cron_expression: 0 0 0 1 1 ? 2100  # Every month on the 5th at 6:00 AM
+        timezone_id: UTC    
+      access_control_list: *id003
+      job_clusters:
+      - job_cluster_key: staging_data_cluster
+        new_cluster: *id001
+      tasks:
+      - task_key: data
+        job_cluster_key: staging_data_cluster
+        spark_python_task:
+          python_file: file://gda_clv/data_engineering_pipelines/NOAM/data_preparation.py
+          parameters:
+            - --base-conf
+            - file:fuse://conf/base.yml
+            - --env-conf
+            - file:fuse://conf/environments/staging.yml       
+            - --model-conf
+            - file:fuse://conf/models/NOAM/data_preparation.yml                
+    - name: CLV_STAGING_NOAM_model_frequency
+      schedule:
+        quartz_cron_expression: 0 0 0 1 1 ? 2100  # Every month on the 5th at 6:00 AM
+        timezone_id: UTC        
+      access_control_list: *id003
+      job_clusters:
+      - job_cluster_key: staging_model_frequency_cluster
+        new_cluster: *id001
+      tasks:
+      - task_key: train_model_frequency
+        job_cluster_key: staging_model_frequency_cluster
+        spark_python_task:
+          python_file: file://gda_clv/model_pipelines/train_model_frequency.py
+          parameters:
+          - --base-conf
+          - file:fuse://conf/base.yml
+          - --env-conf
+          - file:fuse://conf/environments/staging.yml
+          - --model-conf
+          - file:fuse://conf/models/NOAM/frequency_modeling.yml
+        dependsOn: data
+    - name: CLV_STAGING_NOAM_model_monetary
+      schedule:
+        quartz_cron_expression: 0 0 0 1 1 ? 2100  # Every month on the 5th at 6:00 AM
+        timezone_id: UTC    
+      access_control_list: *id003
+      job_clusters:
+      - job_cluster_key: staging_model_monetary_cluster
+        new_cluster: *id001
+      tasks:
+      - task_key: train_model_monetary
+        job_cluster_key: staging_model_monetary_cluster
+        spark_python_task:
+          python_file: file://gda_clv/model_pipelines/train_model_monetary.py
+          parameters:
+          - --base-conf
+          - file:fuse://conf/base.yml
+          - --env-conf
+          - file:fuse://conf/environments/staging.yml
+          - --model-conf
+          - file:fuse://conf/models/NOAM/monetary_modeling.yml
+        dependsOn: train_model_frequency        
+    - name: CLV_STAGING_NOAM_projections
+      schedule:
+        quartz_cron_expression: 0 0 0 1 1 ? 2100  # Every month on the 5th at 6:00 AM
+        timezone_id: UTC    
+      access_control_list: *id003
+      job_clusters:
+      - job_cluster_key: staging_projection_cluster
+        new_cluster: *id001
+      tasks:
+      - task_key: project
+        job_cluster_key: staging_projection_cluster
+        spark_python_task:
+          python_file: file://gda_clv/model_pipelines/project_model_clv.py
+          parameters:
+          - --base-conf
+          - file:fuse://conf/base.yml
+          - --env-conf
+          - file:fuse://conf/environments/staging.yml
+          - --model-conf
+          - file:fuse://conf/models/NOAM/clv_projection.yml
+        dependsOn: train_model_monetary
+    - name: CLV_STAGING_NOAM_inference
+      schedule:
+        quartz_cron_expression: 0 0 0 1 1 ? 2100  # Every month on the 5th at 6:00 AM
+        timezone_id: UTC    
+      access_control_list: *id003
+      job_clusters:
+      - job_cluster_key: staging_inference_cluster
+        new_cluster: *id001
+      tasks:
+      - task_key: inference
+        job_cluster_key: staging_inference_cluster
+        spark_python_task:
+          python_file: file://gda_clv/model_pipelines/inference_model_clv.py
+          parameters:
+          - --base-conf
+          - file:fuse://conf/base.yml
+          - --env-conf
+          - file:fuse://conf/environments/staging.yml
+          - --model-conf
+          - file:fuse://conf/models/NOAM/inference.yml          
+  prod:
+    workflows:
+    - name: CLV_PROD_NOAM_data
+      schedule:
+        quartz_cron_expression: 0 0 15 26 * ?  # Every month on the 5th at 6:00 AM
+        timezone_id: UTC    
+      access_control_list: *id003
+      job_clusters:
+      - job_cluster_key: prod_data_cluster
+        new_cluster: *id001
+      tasks:
+      - task_key: data
+        job_cluster_key:  prod_data_cluster
+        spark_python_task:
+          python_file: file://gda_clv/data_engineering_pipelines/NOAM/data_preparation.py
+          parameters:
+            - --base-conf
+            - file:fuse://conf/base.yml
+            - --env-conf
+            - file:fuse://conf/environments/prod.yml       
+            - --model-conf
+            - file:fuse://conf/models/NOAM/data_preparation.yml                
+    - name: CLV_PROD_NOAM_model_frequency
+      schedule:
+        quartz_cron_expression: 0 0 0 27 * ?  # Every month on the 5th at 6:00 AM
+        timezone_id: UTC        
+      access_control_list: *id003
+      job_clusters:
+      - job_cluster_key:  prod_model_frequency_cluster
+        new_cluster: *id001
+      tasks:
+      - task_key: train_model_frequency
+        job_cluster_key:  prod_model_frequency_cluster
+        spark_python_task:
+          python_file: file://gda_clv/model_pipelines/train_model_frequency.py
+          parameters:
+          - --base-conf
+          - file:fuse://conf/base.yml
+          - --env-conf
+          - file:fuse://conf/environments/prod.yml
+          - --model-conf
+          - file:fuse://conf/models/NOAM/frequency_modeling.yml
+        dependsOn: data
+    - name: CLV_PROD_NOAM_model_monetary
+      schedule:
+        quartz_cron_expression: 0 0 3 27 * ?  # Every month on the 5th at 6:00 AM
+        timezone_id: UTC    
+      access_control_list: *id003
+      job_clusters:
+      - job_cluster_key:  prod_model_monetary_cluster
+        new_cluster: *id001
+      tasks:
+      - task_key: train_model_monetary
+        job_cluster_key:  prod_model_monetary_cluster
+        spark_python_task:
+          python_file: file://gda_clv/model_pipelines/train_model_monetary.py
+          parameters:
+          - --base-conf
+          - file:fuse://conf/base.yml
+          - --env-conf
+          - file:fuse://conf/environments/prod.yml
+          - --model-conf
+          - file:fuse://conf/models/NOAM/monetary_modeling.yml
+        dependsOn: train_model_frequency        
+    - name: CLV_PROD_NOAM_projections
+      schedule:
+        quartz_cron_expression: 0 0 9 27 * ?  # Every month on the 5th at 6:00 AM
+        timezone_id: UTC    
+      access_control_list: *id003
+      job_clusters:
+      - job_cluster_key:  prod_projection_cluster
+        new_cluster: *id001
+      tasks:
+      - task_key: project
+        job_cluster_key:  prod_projection_cluster
+        spark_python_task:
+          python_file: file://gda_clv/model_pipelines/project_model_clv.py
+          parameters:
+          - --base-conf
+          - file:fuse://conf/base.yml
+          - --env-conf
+          - file:fuse://conf/environments/prod.yml
+          - --model-conf
+          - file:fuse://conf/models/NOAM/clv_projection.yml
+        dependsOn: train_model_monetary
+    - name: CLV_PROD_NOAM_inference
+      schedule:
+        quartz_cron_expression: 0 0 12 27 * ?  # Every month on the 5th at 6:00 AM
+        timezone_id: UTC    
+      access_control_list: *id003
+      job_clusters:
+      - job_cluster_key:  prod_inference_cluster
+        new_cluster: *id001
+      tasks:
+      - task_key: inference
+        job_cluster_key:  prod_inference_cluster
+        spark_python_task:
+          python_file: file://gda_clv/model_pipelines/inference_model_clv.py
+          parameters:
+          - --base-conf
+          - file:fuse://conf/base.yml
+          - --env-conf
+          - file:fuse://conf/environments/prod.yml
+          - --model-conf
+          - file:fuse://conf/models/NOAM/inference.yml          

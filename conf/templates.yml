@@ -1,0 +1,132 @@
+job_templates:
+  - name: data
+    tasks:
+      - task_key: data
+        spark_python_task:
+          python_file: "file://gda_clv/data_engineering_pipelines/NOAM/data_preparation.py"
+  
+  - name: train
+    tasks:
+      - task_key: train_model_frequency
+        spark_python_task:
+          python_file: "file://gda_clv/model_pipelines/train_model_frequency.py"
+      - task_key: train_model_monetary
+        spark_python_task:
+          python_file: "file://gda_clv/model_pipelines/train_model_monetary.py"
+        depends_on:
+          train_model_frequency
+
+  - name: project
+    tasks:  
+      - task_key: project
+        spark_python_task:
+          python_file: "file://gda_clv/model_pipelines/project_model_clv.py"
+
+  - name: inference
+    tasks:  
+      - task_key: inference
+        spark_python_task:
+          python_file: "file://gda_clv/model_pipelines/inference_model_clv.py"
+
+  - name: meta_checking
+    tasks:
+      - task_key: meta_checking
+        spark_python_task:
+          python_file: "file://gda_clv/utils/job_meta_checker.py"
+
+schedule:
+    CLV_STAGING_NOAM_data: 0 0 0 1 1 ? 2100
+    CLV_STAGING_NOAM_model_frequency: 0 0 0 1 1 ? 2100
+    CLV_STAGING_NOAM_model_monetary: 0 0 0 1 1 ? 2100
+    CLV_STAGING_NOAM_projections: 0 0 0 1 1 ? 2100
+    CLV_STAGING_NOAM_inference: 0 0 0 1 1 ? 2100
+
+    CLV_PROD_NOAM_data: 0 0 15 26 * ?
+    CLV_PROD_NOAM_model_frequency: 0 0 0 27 * ?
+    CLV_PROD_NOAM_model_monetary: 0 0 3 27 * ?
+    CLV_PROD_NOAM_projections: 0 0 9 27 * ?
+    CLV_PROD_NOAM_inference: 0 0 12 27 * ?
+
+job_levels:
+  environment:
+    - meta_checking
+  region:
+    - data  
+  model:
+    - train_model_frequency
+    - train_model_monetary
+    - project
+    - inference
+
+# Add scheduling info in order to use job_templates_scheduler_gen.py. It will continually updated templates.yml
+
+env_jobs:
+  dev:
+    - name: data
+    - name: train_model_frequency
+    - name: train_model_monetary
+    - name: project
+    - name: inference
+
+  staging:
+    - name: data
+    - name: train_model_frequency
+    - name: train_model_monetary
+    - name: project
+    - name: inference
+    - name: meta_tracking
+
+  prod:
+    - name: data
+    - name: train_model_frequency
+    - name: train_model_monetary
+    - name: project
+    - name: inference
+
+job_key_order:
+  - name
+  - schedule
+  - access_control_list
+  - job_clusters
+  - tasks
+
+custom_anchors:
+  default_cluster_spec:
+    spark_version: 12.1.x-cpu-ml-scala2.12
+    instance_pool_id: 0511-140736-blent10-pool-u8krwlv6
+    driver_instance_pool_id: 0511-140736-blent10-pool-u8krwlv6
+    num_workers: 1
+  train-cluster-spec:
+    spark_version: 12.1.x-cpu-ml-scala2.12
+    node_type_id: Standard_DS12_v2
+    driver_node_type_id: Standard_DS12_v2
+    num_workers: 4
+
+custom:
+  dev_cluster_config:
+    new_cluster: default_cluster_spec
+  staging_cluster_config:
+    new_cluster: default_cluster_spec
+  prod_cluster_config:
+    new_cluster: default_cluster_spec
+  dev_train_cluster_config:
+    new_cluster: default_cluster_spec
+  staging_train_cluster_config:
+    new_cluster: train-cluster-spec
+  prod_train_cluster_config:
+    new_cluster: train-cluster-spec
+  dev_acl:
+  - user_name: service-principal://SP-DataBrick-AM-EUS-Dev-DSF
+    permission_level: IS_OWNER
+  - group_name: rbm-ds
+    permission_level: CAN_MANAGE
+  staging_acl:
+  - user_name: service-principal://SP-DataBrick-AM-EUS-Dev-DSF
+    permission_level: IS_OWNER
+  - group_name: rbm-ds
+    permission_level: CAN_MANAGE_RUN
+  prod_acl:
+  - user_name: service-principal://SP-DataBrick-AM-EUS-Dev-DSF
+    permission_level: IS_OWNER
+  - group_name: rbm-ds
+    permission_level: CAN_MANAGE_RUN

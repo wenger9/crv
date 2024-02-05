@@ -1,0 +1,8 @@
+{
+    "instance_pool_name": "ml_pool",
+    "node_type_id": "Standard_D3_v2",
+    "preloaded_spark_versions": "12.1.x-cpu-ml-scala2.12",
+    "min_idle_instances": 0,
+    "max_capacity": 4,
+    "idle_instance_autotermination_minutes": 30
+}

@@ -1,0 +1,45 @@
+resources:
+  repositories:
+  - repository: ml-meta
+    type: git
+    name: ELC-DSF/ml-meta
+    ref: "refs/heads/main"
+
+trigger:
+  branches:
+    include:
+    - "dev"
+
+stages:
+- stage: onPush
+  condition: and(succeeded(), eq(variables['Build.Reason'], 'PullRequest'))
+  jobs:
+  - job: onPushJob
+    pool:
+      vmImage: "ubuntu-22.04"
+    steps:
+    - script: env | sort
+      displayName: "Environment / Context"
+
+    - task: UsePythonVersion@0
+      displayName: "Use Python 3.9"
+      inputs:
+        versionSpec: 3.9
+
+    - checkout: self
+      persistCredentials: true
+      clean: true
+      displayName: "Checkout & Build.Reason: $(Build.Reason) & Build.SourceBranchName: $(BRANCH_NAME)"
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install -r unit-requirements.txt
+      displayName: "Install dependencies for testing"
+
+    # - script: |
+    #     pylint gda_clv
+    #   displayName: "Run linting check"
+
+    # - script: |
+    #     python -m pytest
+    #   displayName: "Run Unit tests"

@@ -1,0 +1,34 @@
+# Base configurations 'gda-clv'
+project_code: CLV
+experiment_base_path: /GDA/ML_Projects/clv-test
+
+storage_account: saameusdevdsfdata01
+storage_container: ds-gda
+output_base_path: CLVOutput
+inference_output_table: results_noam
+storage_secret_scope: ml-repeat-buyer
+storage_secret_key: BLOB-SAS-TOKEN-ML-REPEAT-BUYER
+
+# Feature Store and Targets Table params
+feature_table_name: features
+targets_table_name: targets
+
+# Column names for customer identification and timestamps
+id_col: consumer_id #customer_id
+timestamp_col: sale_dt #transaction_date
+
+# Databricks database configurations
+database_name: clv
+
+# Commenting out external databases. We're tapping into the bronze layer.
+external_databases:
+  NOAM:
+    secret_config:
+      scope: AKV-AM-EUS-DEV-DSF
+      username: Username-SQLDB-sql-cdp
+      password: Password-SQLDB-sql-cdp
+    hostname: sql-am-eastus-prod-cdpna-01.database.windows.net
+    port: 1443
+    database: dw-am-eastus-prod-cdpna
+
+branch_name: feature/default-branch-name

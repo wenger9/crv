@@ -1,0 +1,612 @@
+resources:
+  repositories:
+  - repository: ml-meta
+    type: git
+    name: ELC-DSF/ml-meta
+    ref: "refs/heads/main"
+
+trigger:
+  branches:
+    include:
+    - "dev"
+    - "staging"
+    - "prod"
+
+stages:
+- stage: DevStage
+  jobs:
+  - job: onSampleCodeDeployJob
+    timeoutInMinutes: 180
+    condition: |
+      and(
+          succeeded(),
+          eq(variables['Build.Reason'], 'PullRequest'),
+          startsWith(variables['System.PullRequest.TargetBranch'], 'refs/heads/dev')
+      )
+    pool:
+      vmImage: "ubuntu-22.04"
+    steps:
+    - script: env | sort
+      displayName: "Environment / Context"
+
+    - task: UsePythonVersion@0
+      displayName: "Set Python Version"
+      inputs:
+        versionSpec: '3.9'
+
+    - checkout: ml-meta
+
+    - checkout: self
+      persistCredentials: true
+      clean: true
+      displayName: "Checkout & Build.Reason: $(Build.Reason) & Build.SourceBranchName: $(BRANCH_NAME)"
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install pydantic==1.10.10
+        pip install dbx==0.8.8
+        pip install urllib3==1.26.15
+        pip install typing-extensions==4.5.0
+      displayName: "Install dbx"
+
+    - bash: |
+        echo "##vso[task.setvariable variable=DATABRICKS_TOKEN;issecret=true]$(python ml-meta/utils/get_token.py)"
+      env:
+        SP_TENANT_ID: $(SP_TENANT_ID)
+        SP_CLIENT_ID: $(SP_CLIENT_ID)
+        SP_CLIENT_SECRET: $(SP_CLIENT_SECRET)
+      displayName: "Get service principal access token"
+
+    - script: |
+        echo "# $(System.PullRequest.SourceCommitId)" >> ./gda_clv/model_pipelines/inference_model_clv.py
+        echo "# $(System.PullRequest.SourceCommitId)" >> ./gda_clv/utils/job_meta_checker.py
+      workingDirectory: $(Build.Repository.Name)
+      displayName: "Commit id log info"
+
+    - script: |
+        echo -e '$d\nw\nq'| ed $(Build.SourcesDirectory)/gda-clv/conf/base.yml
+        echo "branch_name: $(Build.SourceBranch)" >> $(Build.SourcesDirectory)/gda-clv/conf/base.yml
+      displayName: "Write info: current branch name into conf"
+
+    # ------------------------------------------------------
+    #                      - DBX Deploy -
+    #                    Deploy Dev Pipeline
+    # ------------------------------------------------------
+    # Deploy your DBX env here
+    # Pass your deployment.yml to --deployment-file
+    # ------------------------------------------------------
+    - bash: |
+        echo "Build.SourcesDirectory: $(Build.SourcesDirectory)"
+        echo "Target Branch: $(System.PullRequest.TargetBranch)"
+      displayName: "Debug Information"
+      # env:
+      #   SYSTEM_PULLREQUEST_TARGETBRANCH: $(System.PullRequest.TargetBranch)
+
+
+    # RH edits 2/1
+    - bash: |
+        python $(Build.SourcesDirectory)/gda-clv/gda_clv/utils/api/make_ws_dir.py $(System.PullRequest.TargetBranch)
+      env:
+        PYTHONPATH: "."
+        DATABRICKS_HOST: $(DATABRICKS_HOST)
+        DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+      workingDirectory: $(Build.Repository.Name)
+      displayName: "Create MLFlow Experiments paths"
+
+    - bash: |
+        python $(Build.SourcesDirectory)/gda-clv/gda_clv/utils/api/permissions.py
+      env:
+        PYTHONPATH: "."
+        DATABRICKS_HOST: $(DATABRICKS_HOST)
+        DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+      workingDirectory: $(Build.Repository.Name)
+      displayName: "Overwrite permissions of MLFlow Registered Models."
+
+    - script: |
+        branchName=$(Build.SourceBranch)
+        echo "Deploying using branch name: $branchName"
+        dbx deploy --deployment-file $(Build.SourcesDirectory)/gda-clv/conf/deployment.yml --environment=dev --branch-name $branchName
+      workingDirectory: $(Build.SourcesDirectory)/gda-clv
+      env:
+        DATABRICKS_HOST: $(DATABRICKS_HOST)
+        DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+      displayName: "Deploy dev pipelines"
+    # ------------------------------------------------------
+    #                       - END -
+    #                      DBX Deploy
+    # ------------------------------------------------------  
+
+  - job: onSampleDataPrepJob
+    dependsOn: onSampleCodeDeployJob
+    timeoutInMinutes: 180
+    condition: |
+      and(
+          succeeded(),
+          eq(variables['Build.Reason'], 'PullRequest'),
+          startsWith(variables['System.PullRequest.TargetBranch'], 'refs/heads/dev')
+      )
+    pool:
+      vmImage: "ubuntu-22.04"
+    steps:
+    - script: env | sort
+      displayName: "Environment / Context"
+
+    - task: UsePythonVersion@0
+      displayName: "Set Python Version"
+      inputs:
+        versionSpec: '3.9'
+
+    - checkout: ml-meta
+
+    - checkout: self
+      persistCredentials: true
+      clean: true
+      displayName: "Checkout & Build.Reason: $(Build.Reason) & Build.SourceBranchName: $(BRANCH_NAME)"
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install pydantic==1.10.10
+        pip install dbx==0.8.8
+        pip install urllib3==1.26.15
+        pip install typing-extensions==4.5.0
+      displayName: "Install dbx"
+
+    - bash: |
+        echo "##vso[task.setvariable variable=DATABRICKS_TOKEN;issecret=true]$(python ml-meta/utils/get_token.py)"
+      env:
+        SP_TENANT_ID: $(SP_TENANT_ID)
+        SP_CLIENT_ID: $(SP_CLIENT_ID)
+        SP_CLIENT_SECRET: $(SP_CLIENT_SECRET)
+      displayName: "Get service principal access token"
+
+    # - script: |
+    #     echo -e '$d\nw\nq'| ed $(Build.SourcesDirectory)/gda-clv/conf/base.yml
+    #     echo "branch_name: $(Build.SourceBranch)" >> $(Build.SourcesDirectory)/gda-clv/conf/base.yml
+    #   displayName: "Write info: current branch name into conf"
+
+  #   # ------------------------------------------------------
+  #   #                      - DBX Launch -
+  #   #                 Data Preparation Pipeline
+  #   # ------------------------------------------------------
+  #   # Launch your DBX env here
+  #   # Pass your workflow name as the job argument
+  #   # Refer to your deployment.yml for your workflow names
+  #   # ------------------------------------------------------
+    - script: |
+        branchName=$(Build.SourceBranch)
+        echo "Deploying using branch name: $branchName"
+        dbx launch --environment=dev --job=CLV_DEV_NOAM_data --trace        
+      workingDirectory: $(Build.SourcesDirectory)/gda-clv
+      env:
+        DATABRICKS_HOST: $(DATABRICKS_HOST)
+        DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+      displayName: "Launch sample data prep pipelines"
+  #   # ------------------------------------------------------
+  #   #                       - END -
+  #   #                      DBX Launch
+  #   # ------------------------------------------------------      
+  
+  - job: onSampleModelFrequencyTrainJob
+    dependsOn: onSampleDataPrepJob
+    timeoutInMinutes: 180
+    condition: |
+      and(
+          succeeded(),
+          eq(variables['Build.Reason'], 'PullRequest'),
+          startsWith(variables['System.PullRequest.TargetBranch'], 'refs/heads/dev')
+      )
+    pool:
+      vmImage: "ubuntu-22.04"
+    steps:
+    - script: env | sort
+      displayName: "Environment / Context"
+
+    - task: UsePythonVersion@0
+      displayName: "Set Python Version"
+      inputs:
+        versionSpec: '3.9'
+
+    - checkout: ml-meta
+
+    - checkout: self
+      persistCredentials: true
+      clean: true
+      displayName: "Checkout & Build.Reason: $(Build.Reason) & Build.SourceBranchName: $(BRANCH_NAME)"
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install pydantic==1.10.10
+        pip install dbx==0.8.8
+        pip install urllib3==1.26.15
+        pip install typing-extensions==4.5.0
+      displayName: "Install dbx"
+
+    - bash: |
+        echo "##vso[task.setvariable variable=DATABRICKS_TOKEN;issecret=true]$(python ml-meta/utils/get_token.py)"
+      env:
+        SP_TENANT_ID: $(SP_TENANT_ID)
+        SP_CLIENT_ID: $(SP_CLIENT_ID)
+        SP_CLIENT_SECRET: $(SP_CLIENT_SECRET)
+      displayName: "Get service principal access token"
+
+    # - script: |
+    #     echo -e '$d\nw\nq'| ed $(Build.SourcesDirectory)/gda-clv/conf/base.yml
+    #     echo "branch_name: $(Build.SourceBranch)" >> $(Build.SourcesDirectory)/gda-clv/conf/base.yml
+    #   displayName: "Write info: current branch name into conf"
+
+    # ------------------------------------------------------
+    #                      - START -
+    #                      DBX Launch
+    #           Frequency Model Training Pipeline
+    # ------------------------------------------------------
+    # Launch your DBX env here
+    # Pass your workflow name as the job argument
+    # Refer to your deployment.yml for your workflow names
+    # ------------------------------------------------------
+    - script: |
+        branchName=$(Build.SourceBranch)
+        echo "Deploying using branch name: $branchName"
+        dbx launch --environment=dev --job=CLV_DEV_NOAM_model_frequency --trace        
+      workingDirectory: $(Build.SourcesDirectory)/gda-clv
+      env:
+        DATABRICKS_HOST: $(DATABRICKS_HOST)
+        DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+      displayName: "Frequency Model Training"
+    # ------------------------------------------------------
+    #                       - END -
+    #                      DBX Launch
+    # ------------------------------------------------------      
+
+  - job: onSampleModelMonetaryTrainJob
+    dependsOn: onSampleModelFrequencyTrainJob
+    timeoutInMinutes: 180
+    condition: |
+      and(
+          succeeded(),
+          eq(variables['Build.Reason'], 'PullRequest'),
+          startsWith(variables['System.PullRequest.TargetBranch'], 'refs/heads/dev')
+      )
+    pool:
+      vmImage: "ubuntu-22.04"
+    steps:
+    - script: env | sort
+      displayName: "Environment / Context"
+
+    - task: UsePythonVersion@0
+      displayName: "Set Python Version"
+      inputs:
+        versionSpec: '3.9'
+
+    - checkout: ml-meta
+
+    - checkout: self
+      persistCredentials: true
+      clean: true
+      displayName: "Checkout & Build.Reason: $(Build.Reason) & Build.SourceBranchName: $(BRANCH_NAME)"
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install pydantic==1.10.10
+        pip install dbx==0.8.8
+        pip install urllib3==1.26.15
+        pip install typing-extensions==4.5.0
+      displayName: "Install dbx"
+
+    - bash: |
+        echo "##vso[task.setvariable variable=DATABRICKS_TOKEN;issecret=true]$(python ml-meta/utils/get_token.py)"
+      env:
+        SP_TENANT_ID: $(SP_TENANT_ID)
+        SP_CLIENT_ID: $(SP_CLIENT_ID)
+        SP_CLIENT_SECRET: $(SP_CLIENT_SECRET)
+      displayName: "Get service principal access token"
+
+    # - script: |
+    #     echo -e '$d\nw\nq'| ed $(Build.SourcesDirectory)/gda-clv/conf/base.yml
+    #     echo "branch_name: $(Build.SourceBranch)" >> $(Build.SourcesDirectory)/gda-clv/conf/base.yml
+    #   displayName: "Write info: current branch name into conf"
+
+    # ------------------------------------------------------
+    #                      - START -
+    #                      DBX Launch
+    #            Monetary Model Training Pipeline
+    # ------------------------------------------------------
+    # Launch your DBX env here
+    # Pass your workflow name as the job argument
+    # Refer to your deployment.yml for your workflow names
+    # ------------------------------------------------------
+    - script: |
+        branchName=$(Build.SourceBranch)
+        echo "Deploying using branch name: $branchName"
+        dbx launch --environment=dev --job=CLV_DEV_NOAM_model_monetary --trace        
+      workingDirectory: $(Build.SourcesDirectory)/gda-clv
+      env:
+        DATABRICKS_HOST: $(DATABRICKS_HOST)
+        DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+      displayName: "Monetary Model Training"
+    # ------------------------------------------------------
+    #                       - END -
+    #                      DBX Launch
+    # ------------------------------------------------------      
+
+  - job: onSampleModelProjectionJob
+    dependsOn: onSampleModelMonetaryTrainJob
+    timeoutInMinutes: 180
+    condition: |
+      and(
+          succeeded(),
+          eq(variables['Build.Reason'], 'PullRequest'),
+          startsWith(variables['System.PullRequest.TargetBranch'], 'refs/heads/dev')
+      )
+    pool:
+      vmImage: "ubuntu-22.04"
+    steps:
+    - script: env | sort
+      displayName: "Environment / Context"
+
+    - task: UsePythonVersion@0
+      displayName: "Set Python Version"
+      inputs:
+        versionSpec: '3.9'
+
+    - checkout: ml-meta
+
+    - checkout: self
+      persistCredentials: true
+      clean: true
+      displayName: "Checkout & Build.Reason: $(Build.Reason) & Build.SourceBranchName: $(BRANCH_NAME)"
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install pydantic==1.10.10
+        pip install dbx==0.8.8
+        pip install urllib3==1.26.15
+        pip install typing-extensions==4.5.0
+      displayName: "Install dbx"
+
+    - bash: |
+        echo "##vso[task.setvariable variable=DATABRICKS_TOKEN;issecret=true]$(python ml-meta/utils/get_token.py)"
+      env:
+        SP_TENANT_ID: $(SP_TENANT_ID)
+        SP_CLIENT_ID: $(SP_CLIENT_ID)
+        SP_CLIENT_SECRET: $(SP_CLIENT_SECRET)
+      displayName: "Get service principal access token"
+
+    # - script: |
+    #     echo -e '$d\nw\nq'| ed $(Build.SourcesDirectory)/gda-clv/conf/base.yml
+    #     echo "branch_name: $(Build.SourceBranch)" >> $(Build.SourcesDirectory)/gda-clv/conf/base.yml
+    #   displayName: "Write info: current branch name into conf"
+
+    # ------------------------------------------------------
+    #                      - START -
+    #                      DBX Launch
+    #                 Model Projection Pipeline
+    # ------------------------------------------------------
+    # Launch your DBX env here
+    # Pass your workflow name as the job argument
+    # Refer to your deployment.yml for your workflow names
+    # ------------------------------------------------------
+    - script: |
+        branchName=$(Build.SourceBranch)
+        echo "Deploying using branch name: $branchName"
+        dbx launch --environment=dev --job=CLV_DEV_NOAM_projections --trace
+      workingDirectory: $(Build.SourcesDirectory)/gda-clv
+      env:
+        DATABRICKS_HOST: $(DATABRICKS_HOST)
+        DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+      displayName: "CLV Model Projection"
+    # ------------------------------------------------------
+    #                       - END -
+    #                      DBX Launch
+    # ------------------------------------------------------
+
+  - job: onSampleModelInferenceJob
+    dependsOn: onSampleModelProjectionJob
+    timeoutInMinutes: 180
+    condition: |
+      and(
+          succeeded(),
+          eq(variables['Build.Reason'], 'PullRequest'),
+          startsWith(variables['System.PullRequest.TargetBranch'], 'refs/heads/dev')
+      )
+    pool:
+      vmImage: "ubuntu-22.04"
+    steps:
+    - script: env | sort
+      displayName: "Environment / Context"
+
+    - task: UsePythonVersion@0
+      displayName: "Set Python Version"
+      inputs:
+        versionSpec: '3.9'
+
+    - checkout: ml-meta
+
+    - checkout: self
+      persistCredentials: true
+      clean: true
+      displayName: "Checkout & Build.Reason: $(Build.Reason) & Build.SourceBranchName: $(BRANCH_NAME)"
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install pydantic==1.10.10
+        pip install dbx==0.8.8
+        pip install urllib3==1.26.15
+        pip install typing-extensions==4.5.0
+      displayName: "Install dbx"
+
+    - bash: |
+        echo "##vso[task.setvariable variable=DATABRICKS_TOKEN;issecret=true]$(python ml-meta/utils/get_token.py)"
+      env:
+        SP_TENANT_ID: $(SP_TENANT_ID)
+        SP_CLIENT_ID: $(SP_CLIENT_ID)
+        SP_CLIENT_SECRET: $(SP_CLIENT_SECRET)
+      displayName: "Get service principal access token"
+
+    # - script: |
+    #     echo -e '$d\nw\nq'| ed $(Build.SourcesDirectory)/gda-clv/conf/base.yml
+    #     echo "branch_name: $(Build.SourceBranch)" >> $(Build.SourcesDirectory)/gda-clv/conf/base.yml
+    #   displayName: "Write info: current branch name into conf"
+
+    # ------------------------------------------------------
+    #                      - START -
+    #                      DBX Launch
+    #                 Model Inference Pipeline
+    # ------------------------------------------------------
+    # Launch your DBX env here
+    # Pass your workflow name as the job argument
+    # Refer to your deployment.yml for your workflow names
+    # ------------------------------------------------------
+    - script: |
+        branchName=$(Build.SourceBranch)
+        echo "Deploying using branch name: $branchName"
+        dbx launch --environment=dev --job=CLV_DEV_NOAM_inference --trace
+      workingDirectory: $(Build.SourcesDirectory)/gda-clv
+      env:
+        DATABRICKS_HOST: $(DATABRICKS_HOST)
+        DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+      displayName: "CLV Model Inference"
+    # ------------------------------------------------------
+    #                       - END -
+    #                      DBX Launch
+    # ------------------------------------------------------
+
+- stage: onStaging
+  jobs:
+  - job: onStagingDeploy
+    condition: |
+      and(
+          succeeded(),
+          eq(variables['Build.Reason'], 'PullRequest'),
+          startsWith(variables['System.PullRequest.TargetBranch'], 'refs/heads/staging')
+      )
+    pool:
+      vmImage: "ubuntu-22.04"
+    steps:
+    - script: env | sort
+      displayName: "Environment / Context"
+
+    - task: UsePythonVersion@0
+      displayName: "Use Python 3.9"
+      inputs:
+        versionSpec: 3.9
+
+    - checkout: ml-meta
+
+    - checkout: self
+      persistCredentials: true
+      clean: true
+      displayName: "Checkout & Build.Reason: $(Build.Reason) & Build.SourceBranchName: $(BRANCH_NAME)"
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install pydantic==1.10.10        
+        pip install dbx==0.8.8
+        pip install urllib3==1.26.15
+        pip install typing-extensions==4.5.0
+      displayName: "Install dbx"
+
+    - bash: |
+        echo "##vso[task.setvariable variable=DATABRICKS_TOKEN;issecret=true]$(python ml-meta/utils/get_token.py)"
+      env:
+        SP_TENANT_ID: $(SP_TENANT_ID)
+        SP_CLIENT_ID: $(SP_CLIENT_ID)
+        SP_CLIENT_SECRET: $(SP_CLIENT_SECRET)
+      displayName: "Get service principal access token"
+
+    - script: |
+        echo "# $(System.PullRequest.SourceCommitId)" >> ./gda_clv/model_pipelines/inference_model_clv.py
+        echo "# $(System.PullRequest.SourceCommitId)" >> ./gda_clv/utils/job_meta_checker.py
+      workingDirectory: $(Build.Repository.Name)
+      displayName: "Commit id log info"
+
+    - script: |
+        echo -e '$d\nw\nq'| ed ./conf/base.yml
+        echo "branch_name: $(System.PullRequest.SourceBranch)" >> ./conf/base.yml
+      workingDirectory: $(Build.Repository.Name)
+      displayName: "Write info: current branch name into conf"
+
+    - bash: |
+        python $(Build.SourcesDirectory)/gda-clv/gda_clv/utils/api/make_ws_dir.py $(System.PullRequest.TargetBranch)
+      env:
+        PYTHONPATH: "."
+        DATABRICKS_HOST: $(DATABRICKS_HOST)
+        DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+      workingDirectory: $(Build.Repository.Name)
+      displayName: "Create MLFlow Experiments paths"
+
+    - script: |
+        dbx deploy --deployment-file conf/deployment.yml --environment=staging --branch-name $(System.PullRequest.SourceBranch)
+      workingDirectory: $(Build.Repository.Name)
+      env:
+        DATABRICKS_HOST: $(DATABRICKS_HOST)
+        DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+      displayName: "Deploy staging pipelines"
+
+
+- stage: onProd
+  jobs:
+  - job: onProdDeploy
+    timeoutInMinutes: 720
+    condition: |
+      and(
+          succeeded(),
+          eq(variables['Build.Reason'], 'PullRequest'),
+          startsWith(variables['System.PullRequest.TargetBranch'], 'refs/heads/prod')
+      )
+    pool:
+      vmImage: "ubuntu-22.04"
+    steps:
+    - script: env | sort
+      displayName: "Environment / Context"
+
+    - task: UsePythonVersion@0
+      displayName: "Use Python 3.9"
+      inputs:
+        versionSpec: 3.9
+
+    - checkout: ml-meta
+
+    - checkout: self
+      persistCredentials: true
+      clean: true
+      displayName: "Checkout & Build.Reason: $(Build.Reason) & Build.SourceBranchName: $(BRANCH_NAME)"
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install pydantic==1.10.10        
+        pip install dbx==0.8.8
+        pip install urllib3==1.26.15
+        pip install typing-extensions==4.5.0
+      displayName: "Install dbx"
+
+    - bash: |
+        echo "##vso[task.setvariable variable=DATABRICKS_TOKEN;issecret=true]$(python ml-meta/utils/get_token.py)"
+      env:
+        SP_TENANT_ID: $(SP_TENANT_ID)
+        SP_CLIENT_ID: $(SP_CLIENT_ID)
+        SP_CLIENT_SECRET: $(SP_CLIENT_SECRET)
+      displayName: "Get service principal access token"
+
+    - script: |
+        echo "# $(System.PullRequest.SourceCommitId)" >> ./gda_clv/model_pipelines/inference_model_clv.py
+        echo "# $(System.PullRequest.SourceCommitId)" >> ./gda_clv/utils/job_meta_checker.py
+      workingDirectory: $(Build.Repository.Name)
+      displayName: "Commit id log info"
+
+
+    - script: |
+        dbx deploy --deployment-file conf/deployment.yml --environment=staging --branch-name $(System.PullRequest.SourceBranch)
+      workingDirectory: $(Build.Repository.Name)
+      env:
+        DATABRICKS_HOST: $(DATABRICKS_HOST)
+        DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+      displayName: "Deploy the staging code pipeline"
+
+
+    - script: |
+        dbx launch --job=CLV_STAGING_meta_checking --trace --environment=staging
+      workingDirectory: $(Build.Repository.Name)
+      env:
+        DATABRICKS_HOST: $(DATABRICKS_HOST)
+        DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+      displayName: "Launch the checking pipeline"

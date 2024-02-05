@@ -1,0 +1,26 @@
+region: NOAM
+model_name: data_preparation
+feature_types:
+  snapshot_dt: datetime
+  CustomerID: string
+  frequency_cal: numeric
+  recency_cal: numeric
+  T_cal: numeric
+  monetary_value_cal: numeric
+  frequency_holdout: numeric
+  monetary_value_holdout: numeric
+  duration_holdout: numeric
+positive_target: data_prep
+target: data  
+source_tables:
+  txn_noam_orig: clv.vw_noam_txn_data_bronze
+dest_tables:
+  txn_noam_train: clv.master_train_noam
+  txn_noam_full: clv.master_full_noam
+features_eval_period: 12
+targets_eval_period: 12
+acl:
+  - service_principal_name: 8770d3ee-90f9-40d6-8a52-68844a121418
+    permission_level: CAN_MANAGE
+  - group_name: rbm-ds
+    permission_level: CAN_MANAGE

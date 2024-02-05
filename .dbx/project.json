@@ -1,0 +1,32 @@
+{
+    "environments": {
+        "dev": {
+            "profile": "DEFAULT",
+            "storage_type": "mlflow",
+            "properties": {
+                "workspace_directory": "/GDA/ML_Projects/clv-test/dbx/dev",
+                "artifact_location": "dbfs:/dbx/clv-test/dev"
+                
+            }
+        },
+        "staging": {
+            "profile": "DEFAULT",
+            "storage_type": "mlflow",
+            "properties": {
+                "workspace_directory": "/GDA/ML_Projects/clv-test/dbx/staging",
+                "artifact_location": "dbfs:/dbx/clv-test/staging"
+            }
+        },
+        "prod": {
+            "profile": "DEFAULT",
+            "storage_type": "mlflow",
+            "properties": {
+                "workspace_directory": "/GDA/ML_Projects/clv-test/dbx/prod",
+                "artifact_location": "dbfs:/dbx/clv-test/prod"
+            }
+        }
+    },
+    "inplace_jinja_support": false,
+    "failsafe_cluster_reuse_with_assets": false,
+    "context_based_upload_for_execute": false
+}

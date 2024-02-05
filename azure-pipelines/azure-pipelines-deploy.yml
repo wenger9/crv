@@ -1,0 +1,161 @@
+resources:
+  repositories:
+  - repository: ml-meta
+    type: git
+    name: ELC-DSF/ml-meta
+    ref: "refs/heads/main"
+
+trigger:
+  branches:
+    include:
+    - "staging"
+    - "prod"
+
+stages:
+- stage: onStaging
+  jobs:
+  - job: onStagingDeploy
+    condition: |
+       and(
+           succeeded(),
+           startsWith(variables['Build.SourceBranch'], 'refs/heads/staging')
+       )
+    pool:
+      vmImage: "ubuntu-22.04"
+    steps:
+    - script: env | sort
+      displayName: "Environment / Context"
+
+    - task: UsePythonVersion@0
+      displayName: "Use Python 3.9"
+      inputs:
+        versionSpec: 3.9
+
+    - checkout: ml-meta
+
+    - checkout: self
+      persistCredentials: true
+      clean: true
+      displayName: "Checkout & Build.Reason: $(Build.Reason) & Build.SourceBranchName: $(BRANCH_NAME)"
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install pydantic==1.10.10
+        pip install dbx==0.8.8
+        pip install urllib3==1.26.15
+        pip install typing-extensions==4.5.0
+      displayName: "Install dbx"
+
+    - bash: |
+        cd ./gda_clv/utils/
+        python ./job_templates_scheduler_gen.py
+        python ./job_gen.py
+      workingDirectory: $(Build.Repository.Name)
+      displayName: "Dynamically schedule generating"
+
+    - bash: |
+        echo "##vso[task.setvariable variable=DATABRICKS_TOKEN;issecret=true]$(python ml-meta/utils/get_token.py)"
+      env:
+        SP_TENANT_ID: $(SP_TENANT_ID)
+        SP_CLIENT_ID: $(SP_CLIENT_ID)
+        SP_CLIENT_SECRET: $(SP_CLIENT_SECRET)
+      displayName: "Get service principal access token"
+
+    - script: |
+        echo "# $(Build.SourceVersion)" >> ./gda_clv/model_pipelines/inference_model_clv.py
+      workingDirectory: $(Build.Repository.Name)
+      displayName: "Commit id log info"
+
+    - script: |
+        echo -e '$d\nw\nq'| ed ./conf/base.yml
+        echo "branch_name: $(Build.SourceBranch)" >> ./conf/base.yml
+      workingDirectory: $(Build.Repository.Name)
+      displayName: "Write info: current branch name into conf"
+
+    - bash: |
+        python gda_clv/utils/api/make_ws_dir.py $(Build.SourceBranch)
+      env:
+        PYTHONPATH: "."
+        DATABRICKS_HOST: $(DATABRICKS_HOST)
+        DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+      workingDirectory: $(Build.Repository.Name)
+      displayName: "Create MLFlow Experiments paths"
+
+    - script: |
+        dbx deploy --deployment-file conf/deployment.yml --environment=staging --branch-name $(Build.SourceBranch)
+      workingDirectory: $(Build.Repository.Name)
+      env:
+        DATABRICKS_HOST: $(DATABRICKS_HOST)
+        DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+      displayName: "Deploy staging pipelines"
+
+
+- stage: onProd
+  jobs:
+  - job: onProdDeploy
+    condition: |
+      and(
+          succeeded(),
+          startsWith(variables['Build.SourceBranch'], 'refs/heads/prod')
+      )
+    pool:
+      vmImage: "ubuntu-22.04"
+    steps:
+    - script: env | sort
+      displayName: "Environment / Context"
+
+    - task: UsePythonVersion@0
+      displayName: "Use Python 3.9"
+      inputs:
+        versionSpec: 3.9
+
+    - checkout: ml-meta
+
+    - checkout: self
+      persistCredentials: true
+      clean: true
+      displayName: "Checkout & Build.Reason: $(Build.Reason) & Build.SourceBranchName: $(BRANCH_NAME)"
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install pydantic==1.10.10 
+        pip install dbx==0.8.8
+        pip install urllib3==1.26.15
+        pip install typing-extensions==4.5.0
+      displayName: "Install dbx"
+
+    - bash: |
+        echo "##vso[task.setvariable variable=DATABRICKS_TOKEN;issecret=true]$(python ml-meta/utils/get_token.py)"
+      env:
+        SP_TENANT_ID: $(SP_TENANT_ID)
+        SP_CLIENT_ID: $(SP_CLIENT_ID)
+        SP_CLIENT_SECRET: $(SP_CLIENT_SECRET)
+      displayName: "Get service principal access token"
+
+    - script: |
+        echo "# $(Build.SourceVersion)" >> ./gda_clv/model_pipelines/inference_model_clv.py
+      workingDirectory: $(Build.Repository.Name)
+      displayName: "Commit id log info"
+
+    - script: |
+        echo -e '$d\nw\nq'| ed ./conf/base.yml
+        echo "branch_name: $(Build.SourceBranch)" >> ./conf/base.yml
+      workingDirectory: $(Build.Repository.Name)
+      displayName: "Write info: current branch name into conf"
+
+    - bash: |
+        python gda_clv/utils/api/make_ws_dir.py $(Build.SourceBranch)
+      env:
+        PYTHONPATH: "."
+        DATABRICKS_HOST: $(DATABRICKS_HOST)
+        DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+      workingDirectory: $(Build.Repository.Name)
+      displayName: "Create MLFlow Experiments paths"
+
+    - script: |
+        dbx deploy --deployment-file conf/deployment.yml --environment=prod --branch-name $(Build.SourceBranch)
+      workingDirectory: $(Build.Repository.Name)
+      env:
+        DATABRICKS_HOST: $(DATABRICKS_HOST)
+        DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+      displayName: "Deploy prod pipelines"
